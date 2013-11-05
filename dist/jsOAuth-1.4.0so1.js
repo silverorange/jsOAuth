@@ -1,6 +1,6 @@
 /**
  *  @license
- *  jsOAuth version 1.3.7
+ *  jsOAuth version 1.4.0so1
  *  Copyright (c) 2010, 2011 Rob Griffiths (http://bytespider.eu)
  *  jsOAuth is freely distributable under the terms of an MIT-style license.
  */
@@ -9,85 +9,205 @@ exports.OAuth = (function (global) {
 
     /** signed.applets.codebase_principal_support to enable support in Firefox **/
 
-    function Collection(obj) {
-        var args = arguments, args_callee = args.callee, args_length = args.length,
-            i, collection = this;
+    function List() {}
 
-        if (!(this instanceof args_callee)) {
-            return new args_callee(obj);
-        }
+    List.prototype = [];
+    List.superclass = Array.prototype;
+    List.prototype.constructor = List;
 
-        for(i in obj) {
-            if (obj.hasOwnProperty(i)) {
-                collection[i] = obj[i];
+    List.prototype.copy = function() {
+        var list = new this.constructor();
+
+        this.forEach(function(value, i) {
+            if (typeof value.copy === 'function') {
+                value = value.copy();
             }
-        }
+            list.push(value);
+        });
 
-        return collection;
-    }
+        return list;
+    };
 
-    function Hash() {}
-    Hash.prototype = {
-        join: function(string){
-            string = string || '';
-            return this.values().join(string);
-        },
-        keys: function(){
-            var i, arr = [], self = this;
-            for (i in self) {
-                if (self.hasOwnProperty(i)) {
-                    arr.push(i);
+    List.prototype.concat = function() {
+        var list = this.copy(), i, j, len;
+
+        for (var i = 0; i < arguments.length; i++) {
+            if (arguments[i] instanceof Array) {
+                for (j = 0, len = arguments[i].length; j < len; j++) {
+                    list.push(arguments[i][j]);
                 }
-            }
-
-            return arr;
-        },
-        values: function(){
-            var i, arr = [], self = this;
-            for (i in self) {
-                if (self.hasOwnProperty(i)) {
-                    arr.push(self[i]);
-                }
-            }
-
-            return arr;
-        },
-        shift: function(){throw 'not implimented';},
-        unshift: function(){throw 'not implimented';},
-        push: function(){throw 'not implimented';},
-        pop: function(){throw 'not implimented';},
-        sort: function(){throw 'not implimented';},
-
-        ksort: function(func){
-            var self = this, keys = self.keys(), i, value, key;
-
-            if (func == undefined) {
-                keys.sort();
             } else {
-                keys.sort(func);
+                list.push(arguments[i]);
             }
+        }
 
-            for (i = 0; i  < keys.length; i++) {
-                key = keys[i];
-                value = self[key];
-                delete self[key];
-                self[key] = value;
-            }
+        return list;
+    };
 
-            return self;
-        },
-        toObject: function () {
-            var obj = {}, i, self = this;
-            for (i in self) {
-                if (self.hasOwnProperty(i)) {
-                    obj[i] = self[i];
+    List.prototype.getFirst = function() {
+        var value = null;
+
+        if (this.length > 0) {
+            value = this[0];
+        }
+
+        return value;
+    };
+
+    if (typeof List.prototype.forEach !== 'function') {
+        List.prototype.forEach = function(callback, scope) {
+            var i, len;
+            for (i = 0, len = this.length; i < len; ++i) {
+                if (i in this) {
+                    callback.call(scope, this[i], i, this);
                 }
             }
-
-            return obj;
+            return this;
         }
     };
-    Collection.prototype = new Hash;
+    function Param(name, value) {
+        var args = arguments, args_callee = args.callee, args_length = args.length,
+            i, param = this;
+
+        if (!(this instanceof args_callee)) {
+            return new args_callee(name, value);
+        }
+
+        if (name instanceof Array && name.length === 2) {
+            param.name  = name[0] + '';
+            param.value = name[1] + '';
+        } else if (name !== undefined) {
+            param.name = name;
+            if (value === undefined) {
+                param.value = '';
+            } else {
+                param.value = value;
+            }
+        }
+
+        return param;
+    }
+
+    Param.prototype.copy = function() {
+        return new Param(this.name, this.value);
+    };
+
+    Param.prototype.toString = function() {
+        var encode = OAuth.urlEncode;
+        return encode(this.name) + '=' + encode(this.value);
+    };
+    function ParamList(arr) {
+        ParamList.superclass.constructor.call(this, arr);
+
+        var args = arguments, args_callee = args.callee, i, paramlist = this;
+
+        if (!(this instanceof args_callee)) {
+            return new args_callee(arr);
+        }
+
+        if (arr instanceof ParamList) {
+            arr.forEach(function(param) {
+                paramlist.push(param);
+            });
+        } else if (arr instanceof Array) {
+            for (i = 0; i < arr.length; i++) {
+                if (arr[i] instanceof Array && arr[i].length === 2) {
+                    paramlist.push(new Param(arr[i][0], arr[i][1]));
+                }
+            }
+        }
+
+        return paramlist;
+    }
+
+    // ParamList is a type of list So inherit
+    ParamList.prototype = new List();
+    ParamList.superclass = List.prototype;
+    ParamList.prototype.constructor = ParamList;
+
+    ParamList.prototype.getByNameInsensitive = function(name) {
+        var list = new this.constructor();
+
+        this.forEach(function(param) {
+            if (param.name.toLowerCase() === name.toLowerCase()) {
+                list.push(param);
+            }
+        });
+
+        return list;
+    };
+
+    ParamList.prototype.getByName = function(name) {
+        var list = new this.constructor();
+
+        this.forEach(function(param) {
+            if (param.name === name) {
+                list.push(param);
+            }
+        });
+
+        return list;
+    };
+
+    ParamList.prototype.sort = function(fn) {
+
+        // default to byte-order sorting of names and then values
+        if (typeof fn === 'undefined') {
+            fn = function(a, b) {
+                if (a.name < b.name) {
+                    return -1;
+                }
+                if (a.name > b.name) {
+                    return 1;
+                }
+                if (a.value < b.value) {
+                    return -1;
+                }
+                if (a.value > b.value) {
+                    return 1;
+                }
+                return 0;
+            };
+        }
+
+        return ParamList.superclass.sort.call(this, fn);
+    };
+
+    ParamList.prototype.removeByName = function(name) {
+        var i, length = this.length;
+        for (i = 0; i < length; i++) {
+            if (this[i].name === name) {
+                this.splice(i, 1);
+                i--;
+                length--;
+            }
+        }
+        return this;
+    };
+
+    ParamList.prototype.toString = function () {
+        var q_arr = [], ret = '';
+
+        this.sort().forEach(function(param) {
+            q_arr.push(param + '');
+        });
+
+        if (q_arr.length > 0) {
+            ret = q_arr.join('&');
+        }
+
+        return ret;
+    };
+
+    ParamList.prototype.toJSON = function() {
+        var q_arr = [];
+
+        this.forEach(function(param) {
+            q_arr.push([ param.name, param.value ]);
+        });
+
+        return q_arr;
+    };
     /**
      * Url
      *
@@ -161,47 +281,14 @@ exports.OAuth = (function (global) {
      *
      * @param {Object} obj
      */
-    function QueryString(obj){
-        var args = arguments, args_callee = args.callee, args_length = args.length,
-            i, querystring = this, decode = OAuth.urlDecode;
-
-        if (!(this instanceof args_callee)) {
-            return new args_callee(obj);
-        }
-
-        if (obj != undefined) {
-            for (i in obj) {
-                if (obj.hasOwnProperty(i)) {
-                    querystring[i] = obj[i];
-                }
-            }
-        }
-
-        return querystring;
+    function QueryString(arr) {
+        QueryString.superclass.constructor.call(this, arr);
     }
-    // QueryString is a type of collection So inherit
-    QueryString.prototype = new Collection();
 
-    QueryString.prototype.toString = function () {
-        var i, self = this, q_arr = [], ret = '',
-        val = '', encode = OAuth.urlEncode;
-        self.ksort(); // lexicographical byte value ordering of the keys
-
-        for (i in self) {
-            if (self.hasOwnProperty(i)) {
-                if (i != undefined && self[i] != undefined) {
-                    val = encode(i) + '=' + encode(self[i]);
-                    q_arr.push(val);
-                }
-            }
-        }
-
-        if (q_arr.length > 0) {
-            ret = q_arr.join('&');
-        }
-
-        return ret;
-    };
+    // QueryString is a type of param list, so inherit
+    QueryString.prototype = new ParamList();
+    QueryString.superclass = ParamList.prototype;
+    QueryString.prototype.constructor = QueryString;
 
     /**
      *
@@ -211,12 +298,33 @@ exports.OAuth = (function (global) {
         var args = arguments, args_length = args.length, i, query_array,
             query_array_length, querystring = this, key_value, decode = OAuth.urlDecode;
 
-        if (args_length == 1) {
+        if (args_length === 1) {
             if (typeof query === 'object') {
-                // iterate
-                for (i in query) {
-                    if (query.hasOwnProperty(i)) {
-                        querystring[i] = decode(query[i]);
+                if (query instanceof Array) {
+                    // iterate array
+                    for (i = 0; i < query.length; i++) {
+                        if (query[i] instanceof Array && query[i].length === 2) {
+                            querystring.push(
+                                new Param(
+                                    query[i][0],
+                                    query[i][1]
+                                )
+                            );
+                        }
+                    }
+                } else if (query instanceof ParamList) {
+                    querystring = query.copy();
+                } else {
+                    // iterate object
+                    for (i in query) {
+                        if (query.hasOwnProperty(i)) {
+                            querystring.push(
+                                new Param(
+                                    i,
+                                    query[i]
+                                )
+                            );
+                        }
                     }
                 }
             } else if (typeof query === 'string') {
@@ -226,15 +334,25 @@ exports.OAuth = (function (global) {
                 for (i = 0, query_array_length = query_array.length; i < query_array_length; i++) {
                     // split on '=' to get key, value
                     key_value = query_array[i].split('=');
-                    if (key_value[0] != "") {
-                        querystring[key_value[0]] = decode(key_value[1]);
+                    if (key_value[0] !== '') {
+                        querystring.push(
+                            new Param(
+                                decode(key_value[0]),
+                                decode(key_value[1])
+                            )
+                        );
                     }
                 }
             }
         } else {
             for (i = 0; i < args_length; i += 2) {
                 // treat each arg as key, then value
-                querystring[args[i]] = decode(args[i+1]);
+                querystring.push(
+                    new Param(
+                        args[i],
+                        args[i + 1]
+                    )
+                );
             }
         }
     };
@@ -265,6 +383,7 @@ exports.OAuth = (function (global) {
             var oauth = {
                 enablePrivilege: options.enablePrivilege || false,
 
+                proxy: options.proxy,
                 proxyUrl: options.proxyUrl,
                 callbackUrl: options.callbackUrl || 'oob',
 
@@ -319,32 +438,37 @@ exports.OAuth = (function (global) {
              * @param options {object}
              *      method {string} ['GET', 'POST', 'PUT', ...]
              *      url {string} A valid http(s) url
-             *      data {object} A key value paired object of data
-             *                      example: {'q':'foobar'}
-             *                      for GET this will append a query string
-             *      headers {object} A key value paired object of additional headers
+             *      data {ParamList} A list of of data. For GET this will append a query string.
+             *      headers {ParamList} A list of additional headers.
              *      success {function} callback for a sucessful request
              *      failure {function} callback for a failed request
              */
             this.request = function (options) {
                 var method, url, data, headers, success, failure, xhr, i,
                     headerParams, signatureMethod, signatureString, signature,
-                    query = [], appendQueryString, signatureData = {}, params, withFile, urlString;
+                    query = [], appendQueryString, signatureData = new ParamList(), params, withFile, urlString,
+                    contentType;
 
                 method = options.method || 'GET';
                 url = URI(options.url);
-                data = options.data || {};
-                headers = options.headers || {};
+                data = (options.data) ? new ParamList(options.data) : new ParamList();
+                headers = (options.headers) ? new ParamList(options.headers) : new ParamList();
                 success = options.success || function () {};
                 failure = options.failure || function () {};
 
                 // According to the spec
                 withFile = (function(){
                     var hasFile = false;
-                    for(var name in data) {
-                        // Thanks to the FileAPI any file entry
-                        // has a fileName property
-                        if(data[name] instanceof  File || typeof data[name].fileName != 'undefined') hasFile = true;
+
+                    if (data instanceof List) {
+                        data.forEach(function(param) {
+                            // Thanks to the FileAPI any file entry
+                            // has a fileName property
+                            if (param.value instanceof File || typeof param.value.fileName !== 'undefined') {
+                                hasFile = true;
+                                return true;
+                            }
+                        });
                     }
 
                     return hasFile;
@@ -361,32 +485,39 @@ exports.OAuth = (function (global) {
                     if (xhr.readyState === 4) {
                         var regex = /^(.*?):\s*(.*?)\r?$/mg,
                             requestHeaders = headers,
-                            responseHeaders = {},
+                            responseHeaders = new ParamList(),
                             responseHeadersString = '',
                             match;
 
                         if (!!xhr.getAllResponseHeaders) {
                             responseHeadersString = xhr.getAllResponseHeaders();
                             while((match = regex.exec(responseHeadersString))) {
-                                responseHeaders[match[1]] = match[2];
+                                responseHeaders.push(new Param(match[1], match[2]));
                             }
-                        } else if(!!xhr.getResponseHeaders) {
+                        } else if (!!xhr.getResponseHeaders) {
                             responseHeadersString = xhr.getResponseHeaders();
                             for (var i = 0, len = responseHeadersString.length; i < len; ++i) {
-                                responseHeaders[responseHeadersString[i][0]] = responseHeadersString[i][1];
+                                responseHeaders.push(
+                                    new Param(
+                                        responseHeadersString[i][0],
+                                        responseHeadersString[i][1]
+                                    )
+                                );
                             }
                         }
 
                         var includeXML = false;
-                        if ('Content-Type' in responseHeaders)
-                        {
-                            if (responseHeaders['Content-Type'] == 'text/xml')
-                            {
-                                includeXML = true;
-                            }
-
+                        var contentType = responseHeaders.getByNameInsensitive('Content-Type').getFirst();
+                        if (contentType && contentType.value === 'text/xml') {
+                            includeXML = true;
                         }
-                        var responseObject = {text: xhr.responseText, xml: (includeXML ? xhr.responseXML : ''), requestHeaders: requestHeaders, responseHeaders: responseHeaders};
+
+                        var responseObject = {
+                            text: xhr.responseText,
+                            xml: (includeXML ? xhr.responseXML : ''),
+                            requestHeaders: requestHeaders,
+                            responseHeaders: responseHeaders
+                        };
 
                         // we are powerless against 3xx redirects
                         if((xhr.status >= 200 && xhr.status <= 226) || xhr.status == 304 || xhr.status === 0) {
@@ -398,34 +529,30 @@ exports.OAuth = (function (global) {
                     }
                 };
 
-                headerParams = {
-                    'oauth_callback': oauth.callbackUrl,
-                    'oauth_consumer_key': oauth.consumerKey,
-                    'oauth_token': oauth.accessTokenKey,
-                    'oauth_signature_method': oauth.signatureMethod,
-                    'oauth_timestamp': getTimestamp(),
-                    'oauth_nonce': getNonce(),
-                    'oauth_verifier': oauth.verifier,
-                    'oauth_version': OAUTH_VERSION_1_0
-                };
+                headerParams = new ParamList([
+                    [ 'oauth_callback', oauth.callbackUrl ],
+                    [ 'oauth_consumer_key', oauth.consumerKey ],
+                    [ 'oauth_token', oauth.accessTokenKey ],
+                    [ 'oauth_signature_method', oauth.signatureMethod ],
+                    [ 'oauth_timestamp', getTimestamp() ],
+                    [ 'oauth_nonce', getNonce() ],
+                    [ 'oauth_verifier', oauth.verifier ],
+                    [ 'oauth_version', OAUTH_VERSION_1_0 ]
+                ]);
 
                 signatureMethod = oauth.signatureMethod;
 
                 // Handle GET params first
-                params = url.query.toObject();
-                for (i in params) {
-                    signatureData[i] = params[i];
-                }
+                signatureData = signatureData.concat(url.query);
 
                 // According to the OAuth spec
                 // if data is transfered using
                 // multipart the POST data doesn't
                 // have to be signed:
                 // http://www.mail-archive.com/oauth@googlegroups.com/msg01556.html
-                if((!('Content-Type' in headers) || headers['Content-Type'] == 'application/x-www-form-urlencoded') && !withFile) {
-                    for (i in data) {
-                        signatureData[i] = data[i];
-                    }
+                contentType = headers.getByNameInsensitive('Content-Type').getFirst();
+                if ((!contentType || contentType.value.toLowerCase() === 'application/x-www-form-urlencoded') && !withFile) {
+                    signatureData = signatureData.concat(data);
                 }
 
                 urlString = url.scheme + '://' + url.host + url.path;
@@ -433,53 +560,57 @@ exports.OAuth = (function (global) {
 
                 signature = OAuth.signatureMethod[signatureMethod](oauth.consumerSecret, oauth.accessTokenSecret, signatureString);
 
-                headerParams.oauth_signature = signature;
+                headerParams.push(new Param('oauth_signature', signature));
 
-                if (this.realm)
-                {
-                    headerParams['realm'] = this.realm;
+                if (this.realm) {
+                    headerParams.push(new Param('realm', this.realm));
                 }
 
-                if (oauth.proxyUrl) {
+                if (oauth.proxy) {
+                    if (typeof oauth.proxy == 'function') {
+                        url = URI(oauth.proxy(url.path, url.query));
+                    } else if(url.query != '') {
+                        url = URI(oauth.proxy + url.path + '?' + url.query);
+                    } else {
+                        url = URI(oauth.proxy + url.path);
+                    }
+                } else if (oauth.proxyUrl) {
                     url = URI(oauth.proxyUrl + url.path);
                 }
 
-                if(appendQueryString || method == 'GET') {
+                if (appendQueryString || method === 'GET') {
                     url.query.setQueryParams(data);
                     query = null;
-                } else if(!withFile){
-                    if (typeof data == 'string') {
+                } else if (!withFile){
+                    if (typeof data === 'string') {
                         query = data;
-                        if (!('Content-Type' in headers)) {
-                            headers['Content-Type'] = 'text/plain';
+                        if (!contentType) {
+                            headers.push(new Param('Content-Type', 'text/plain'));
                         }
                     } else {
-                        for(i in data) {
-                            query.push(OAuth.urlEncode(i) + '=' + OAuth.urlEncode(data[i] + ''));
-                        }
-                        query = query.sort().join('&');
-                        if (!('Content-Type' in headers)) {
-                            headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                        query = data.copy().sort().join('&');
+                        if (!contentType) {
+                            headers.push(new Param('Content-Type', 'application/x-www-form-urlencoded'));
                         }
                     }
-
-                } else if(withFile) {
+                } else if (withFile) {
                     // When using FormData multipart content type
                     // is used by default and required header
                     // is set to multipart/form-data etc
                     query = new FormData();
-                    for(i in data) {
-                        query.append(i, data[i]);
-                    }
+                    data.forEach(function(param) {
+                        query.append(param.name, param.value);
+                    });
                 }
 
                 xhr.open(method, url+'', true);
 
                 xhr.setRequestHeader('Authorization', 'OAuth ' + toHeaderString(headerParams));
                 xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
-                for (i in headers) {
-                    xhr.setRequestHeader(i, headers[i]);
-                }
+
+                headers.forEach(function(param) {
+                    xhr.setRequestHeader(param.name, param.value);
+                });
 
                 xhr.send(query);
             };
@@ -541,13 +672,14 @@ exports.OAuth = (function (global) {
                     success(JSON.parse(data.text));
                 },
                 'failure': failure,
-                'headers': {
-                    'Content-Type': 'application/json'
-                }
+                'headers': [
+                    [ 'Content-Type', 'application/json' ]
+                ]
             });
         },
 
         parseTokenRequest: function (tokenRequest, content_type) {
+            var obj;
 
             switch(content_type)
             {
@@ -555,15 +687,23 @@ exports.OAuth = (function (global) {
                     var token = tokenRequest.xml.getElementsByTagName('token');
                     var secret = tokenRequest.xml.getElementsByTagName('secret');
 
-                    obj[OAuth.urlDecode(token[0])] = OAuth.urlDecode(secret[0]);
+                    obj = {
+                        'oauth_token' : OAuth.urlDecode(token[0]),
+                        'oauth_token_secret' : OAuth.urlDecode(secret[0])
+                    };
+
                     break;
 
                 default:
-                    var i = 0, arr = tokenRequest.text.split('&'), len = arr.length, obj = {};
+                    var i = 0, arr = tokenRequest.text.split('&'), len = arr.length;
+
+                    obj = {};
                     for (; i < len; ++i) {
                         var pair = arr[i].split('=');
                         obj[OAuth.urlDecode(pair[0])] = OAuth.urlDecode(pair[1]);
                     }
+
+                    break;
             }
 
 
@@ -620,24 +760,32 @@ exports.OAuth = (function (global) {
     /**
      * Get a string of the parameters for the OAuth Authorization header
      *
-     * @param params {object} A key value paired object of data
-     *                           example: {'q':'foobar'}
-     *                           for GET this will append a query string
+     * @param params {ParamList} A list of data.
      */
     function toHeaderString(params) {
-        var arr = [], i, realm;
+        var list = new ParamList(), i, realm, encode = OAuth.urlEncode, arr = [];
 
-        for (i in params) {
-            if (params[i] && params[i] !== undefined && params[i] !== '') {
-                if (i === 'realm') {
-                    realm = i + '="' + params[i] + '"';
+        params.forEach(function(param) {
+            if (param.value !== '') {
+                if (param.name.toLowerCase() === 'realm') {
+                    realm = encode(param.name) + '="' + encode(param.value) + '"'
                 } else {
-                    arr.push(i + '="' + OAuth.urlEncode(params[i]+'') + '"');
+                    list.push(
+                        new Param(
+                            param.name,
+                            param.value
+                        )
+                    );
                 }
             }
-        }
+        });
 
-        arr.sort();
+        // encode sorted list
+        list.sort().forEach(function(param) {
+            arr.push(encode(param.name) + '="' + encode(param.value) + '"');
+        });
+
+        // add realm to start
         if (realm) {
             arr.unshift(realm);
         }
@@ -650,50 +798,26 @@ exports.OAuth = (function (global) {
      *
      * @param method {string} ['GET', 'POST', 'PUT', ...]
      * @param url {string} A valid http(s) url
-     * @param header_params A key value paired object of additional headers
-     * @param query_params {object} A key value paired object of data
-     *                               example: {'q':'foobar'}
-     *                               for GET this will append a query string
+     * @param header_params {ParamList} List of additional headers
+     * @param query_params {ParamList} List of POST data or query parameters.
      */
     function toSignatureBaseString(method, url, header_params, query_params) {
-        var arr = [], i, encode = OAuth.urlEncode;
+        var list = new ParamList(), i, encode = OAuth.urlEncode, noEmpty = new ParamList();
 
-        for (i in header_params) {
-            if (header_params[i] !== undefined && header_params[i] !== '') {
-                arr.push([OAuth.urlEncode(i), OAuth.urlEncode(header_params[i]+'')]);
-            }
-        }
+        list = list.concat(header_params).concat(query_params);
 
-        for (i in query_params) {
-            if (query_params[i] !== undefined && query_params[i] !== '') {
-                if (!header_params[i]) {
-                    arr.push([encode(i), encode(query_params[i] + '')]);
-                }
-            }
-        }
+        list.removeByName('oauth_signature');
 
-        arr = arr.sort(function(a, b) {
-          if (a[0] < b[0]) {
-            return -1;
-          } else if (a[0] > b[0]) {
-            return 1;
-          } else {
-            if (a[1] < b[1]) {
-              return -1;
-            } else if (a[1] > b[1]) {
-              return 1;
-            } else {
-              return 0;
+        list.sort().forEach(function(param) {
+            if (param.value !== '') {
+                noEmpty.push(param);
             }
-          }
-        }).map(function(el) {
-          return el.join("=");
         });
 
         return [
             method,
             encode(url),
-            encode(arr.join('&'))
+            encode(noEmpty.join('&'))
         ].join('&');
     }
 
